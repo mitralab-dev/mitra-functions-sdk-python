@@ -48,7 +48,7 @@ The test suite consumes the canonical SDK-PARITY-001 corpus maintained by
 `@mitralab.io/sdk-core`. This repository vendors the exact fixture bytes with a
 source repository, full Git commit, version, and SHA-256 digest so normal tests
 stay deterministic and offline. Version 0.1.0 is pinned to sdk-core commit
-`d3d7a3bae3e845749e769f8e899552039ec4001a`.
+`b513454d0d1f7344a4656cd9c0e1e32530c5ea90`.
 
 Verify the vendored snapshot on its own:
 

@@ -69,7 +69,7 @@ jobs:
           python scripts/check_contract_fixture.py
           curl --fail --show-error --silent --location \
             --output "$RUNNER_TEMP/sdk-parity-v0.1.0.json" \
-            "https://raw.githubusercontent.com/mitralab-dev/mitra-core-sdk/d3d7a3bae3e845749e769f8e899552039ec4001a/contracts/v0.1.0/sdk-parity.json"
+            "https://raw.githubusercontent.com/mitralab-dev/mitra-core-sdk/b513454d0d1f7344a4656cd9c0e1e32530c5ea90/contracts/v0.1.0/sdk-parity.json"
           python scripts/check_contract_fixture.py \
             --canonical "$RUNNER_TEMP/sdk-parity-v0.1.0.json"
           pytest
