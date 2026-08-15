@@ -1,4 +1,5 @@
 import json
+from functools import partial
 
 import httpx
 import pytest
@@ -106,9 +107,10 @@ def test_delete_many_rejects_empty_query_before_request() -> None:
         raise AssertionError("delete_many must validate locally")
 
     client, http_client = make_client(httpx.MockTransport(unexpected))
+    table = client.entities.table("Task")
 
     with pytest.raises(ValueError, match="must not be empty"):
-        client.entities.table("Task").delete_many({})
+        table.delete_many({})
     http_client.close()
 
 
@@ -128,10 +130,8 @@ def test_entity_response_validation(
         httpx.MockTransport(lambda _request: httpx.Response(200, json=response))
     )
     table = client.entities.table("Task")
+    operation_call = table.list if operation == "list" else partial(table.delete_many, {"id": "1"})
 
     with pytest.raises(MitraResponseError, match=message):
-        if operation == "list":
-            table.list()
-        else:
-            table.delete_many({"id": "1"})
+        operation_call()
     http_client.close()
