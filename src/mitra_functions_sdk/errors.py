@@ -14,7 +14,10 @@ class MitraNetworkError(MitraSdkError):
 
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
+        self.status = 0
         self.code = code
+        self.details = None
+        self.request_id = None
         self.retryable = True
 
 
@@ -23,7 +26,10 @@ class MitraResponseError(MitraSdkError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+        self.status = 200
         self.code = "INVALID_RESPONSE"
+        self.details = None
+        self.request_id = None
         self.retryable = False
 
 

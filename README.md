@@ -42,6 +42,37 @@ def handler(event: dict[str, object], context: dict[str, object]) -> dict[str, o
 
 The Python function runner is synchronous, so this SDK deliberately provides a single synchronous API backed by `httpx.Client`.
 
+## Contract parity
+
+The test suite consumes the canonical SDK-PARITY-001 corpus maintained by
+`@mitralab.io/sdk-core`. This repository vendors the exact fixture bytes with a
+source repository, full Git commit, version, and SHA-256 digest so normal tests
+stay deterministic and offline. Version 0.1.0 is pinned to sdk-core commit
+`d3d7a3bae3e845749e769f8e899552039ec4001a`.
+
+Verify the vendored snapshot on its own:
+
+```bash
+python scripts/check_contract_fixture.py
+```
+
+When both worktrees are available, reproduce the cross-repository equivalence
+gate by passing the canonical file:
+
+```bash
+python scripts/check_contract_fixture.py \
+  --canonical ../mitra-sdk-core/contracts/v0.1.0/sdk-parity.json
+```
+
+The path is illustrative and may be absolute. No workspace path is stored in
+the package. Continuous integration and release gates download the canonical
+file from the public repository at that exact commit and compare the bytes.
+They fail even when the vendored file and its local digest are changed together.
+
+The corpus drives all 16 success cases, every response-validation case, and
+every concrete HTTP-adapter case through the real synchronous SDK modules and
+`HttpTransport` with an `httpx.MockTransport` boundary.
+
 ## Configuration
 
 `create_client()` reads the target runtime contract:
@@ -81,6 +112,13 @@ with create_client() as mitra:
 ```
 
 Calling `init()` is idempotent. It requests `GET /code-studio/api/v1/apps/{appId}/info` only when no data source was configured.
+
+The current release targets the Data Manager `main` custom-query request and
+sends both `dataSourceId` and `parameters`. The recorded `alpha` contract accepts
+the same request body but resolves the data source from the authenticated app,
+ignoring the body field. The SDK never retries the POST with another shape. A
+future parameters-only migration still requires the coordinated server,
+canonical-corpus, deprecation, and SDK gates recorded in SDK-PARITY-001.
 
 ## API
 
@@ -165,7 +203,17 @@ Direct integration execution always sets `source` to `SDK`.
 - `MitraConfigError`: missing or invalid local configuration.
 - `MitraNetworkError`: timeout or transport failure before a response.
 - `MitraResponseError`: malformed successful response.
-- `MitraApiError`: non-success HTTP response, with `status`, `code`, `details`, `request_id`, and `retryable` when provided by the service.
+- `MitraApiError`: non-success HTTP response, with normalized `status`, `code`, `details`, `request_id`, and `retryable` metadata.
+
+The local errors use the same normalized envelope as API errors.
+`MitraNetworkError` exposes `status=0`, `details=None`, `request_id=None`, and
+`retryable=True`. `MitraResponseError` exposes `status=200`,
+`code="INVALID_RESPONSE"`, `details=None`, `request_id=None`, and
+`retryable=False` for the successful-response validation path.
+
+When an API error omits `retryable`, the HTTP adapter classifies 4xx responses
+as `False` and 5xx responses as `True`. This is diagnostic classification only.
+The SDK still makes one attempt and never retries a request automatically.
 
 The JavaScript package represents local timeout, network, and invalid-response failures as `MitraApiError` with codes `REQUEST_TIMEOUT`, `NETWORK_ERROR`, or `INVALID_RESPONSE`. These map to Python `MitraNetworkError` and `MitraResponseError`. API responses use `MitraApiError` in both packages.
 

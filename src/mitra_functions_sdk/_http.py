@@ -147,7 +147,11 @@ class HttpTransport:
                 else None
             )
         retryable_value = payload.get("retryable")
-        retryable = retryable_value if isinstance(retryable_value, bool) else None
+        retryable = (
+            retryable_value
+            if isinstance(retryable_value, bool)
+            else response.status_code >= httpx.codes.INTERNAL_SERVER_ERROR
+        )
 
         return MitraApiError(
             message,

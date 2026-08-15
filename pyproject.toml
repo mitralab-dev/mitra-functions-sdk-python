@@ -42,6 +42,7 @@ packages = ["src/mitra_functions_sdk"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
+    "/scripts",
     "/tests",
     "/CHANGELOG.md",
     "/LICENSE",
