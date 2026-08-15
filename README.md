@@ -61,7 +61,7 @@ gate by passing the canonical file:
 
 ```bash
 python scripts/check_contract_fixture.py \
-  --canonical ../mitra-sdk-core/contracts/v0.1.0/sdk-parity.json
+  --canonical ../mitra-core-sdk/contracts/v0.1.0/sdk-parity.json
 ```
 
 The path is illustrative and may be absolute. No workspace path is stored in

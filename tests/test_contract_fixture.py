@@ -220,7 +220,7 @@ def test_snapshot_identity_source_and_digest_are_pinned() -> None:
     assert MANIFEST["contract"] == "SDK-PARITY-001"
     assert MANIFEST["version"] == CONTRACT["version"] == "0.1.0"
     assert source == {
-        "repository": "https://github.com/mitralab-dev/mitra-sdk-core",
+        "repository": "https://github.com/mitralab-dev/mitra-core-sdk",
         "commit": "d3d7a3bae3e845749e769f8e899552039ec4001a",
         "path": "contracts/v0.1.0/sdk-parity.json",
     }
