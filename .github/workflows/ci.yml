@@ -119,7 +119,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: coverage-report
-      - uses: SonarSource/sonarqube-scan-action@v7
+      - uses: SonarSource/sonarqube-scan-action@v8
         with:
           args: -Dsonar.qualitygate.wait=true
         env:
