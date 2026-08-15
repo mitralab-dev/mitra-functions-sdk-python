@@ -1,5 +1,6 @@
 import json
 import traceback
+from functools import partial
 
 import httpx
 import pytest
@@ -310,12 +311,14 @@ def test_non_204_empty_success_is_rejected_safely(status: int, operation: str) -
     client, http_client = client_with(
         httpx.MockTransport(lambda _request: httpx.Response(status, content=b""))
     )
+    if operation == "delete":
+        table = client.entities.table("Task")
+        operation_call = partial(table.delete, "record-1")
+    else:
+        operation_call = partial(client.functions.cancel_execution, "execution-1")
 
     with pytest.raises(MitraResponseError, match=f"empty response with status {status}") as caught:
-        if operation == "delete":
-            client.entities.table("Task").delete("record-1")
-        else:
-            client.functions.cancel_execution("execution-1")
+        operation_call()
 
     error = caught.value
     serialized = serialize_exception(error)
@@ -335,9 +338,10 @@ def test_non_204_json_null_is_not_treated_as_an_empty_success() -> None:
             )
         )
     )
+    table = client.entities.table("Task")
 
     with pytest.raises(MitraResponseError, match="null JSON response") as caught:
-        client.entities.table("Task").delete("record-1")
+        table.delete("record-1")
 
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None

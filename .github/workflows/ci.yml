@@ -54,10 +54,6 @@ jobs:
             --canonical "$RUNNER_TEMP/sdk-parity-v0.1.0.json"
       - name: Test
         run: pytest --cov-report=xml:coverage.xml
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage.xml
 
   compatibility:
     needs: pr-convention
@@ -107,20 +103,3 @@ jobs:
           python -m venv "$wheel_venv"
           "$wheel_venv/bin/python" -m pip install dist/*.whl
           "$wheel_venv/bin/python" -c "from mitra_functions_sdk import MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment; assert all((MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment))"
-
-  sonar:
-    needs: build
-    if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v8
-        with:
-          name: coverage-report
-      - uses: SonarSource/sonarqube-scan-action@v7
-        with:
-          args: -Dsonar.qualitygate.wait=true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

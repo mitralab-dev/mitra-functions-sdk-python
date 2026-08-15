@@ -13,6 +13,7 @@ from .errors import MitraConfigError
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_INVALID_API_URL = "api_url must be a valid HTTP(S) base URL without credentials"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,11 +78,11 @@ def _optional_non_blank(value: str | None, field_name: str) -> str | None:
 
 def _normalize_api_url(value: str) -> str:
     if not isinstance(value, str):
-        raise MitraConfigError("api_url must be a valid HTTP(S) base URL without credentials")
+        raise MitraConfigError(_INVALID_API_URL)
 
     normalized = value.strip()
     if not normalized or any(_is_unsafe_url_character(char) for char in normalized):
-        raise MitraConfigError("api_url must be a valid HTTP(S) base URL without credentials")
+        raise MitraConfigError(_INVALID_API_URL)
 
     parsed_url = _parse_http_url(normalized)
     port = parsed_url.port if parsed_url is not None else None
@@ -99,7 +100,7 @@ def _normalize_api_url(value: str) -> str:
         or "?" in normalized
         or "#" in normalized
     ):
-        raise MitraConfigError("api_url must be a valid HTTP(S) base URL without credentials")
+        raise MitraConfigError(_INVALID_API_URL)
 
     return str(parsed_url).rstrip("/")
 
