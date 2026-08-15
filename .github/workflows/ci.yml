@@ -1,0 +1,126 @@
+name: Build & Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pr-convention:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if echo "$PR_TITLE" | grep -qP "^(feat|fix|refactor|chore|docs)(\(.+\))?: .+ \(#[0-9]+\)$"; then
+            echo "PR title is valid: $PR_TITLE"
+          else
+            echo "PR title must follow: type(scope): description (#issue)"
+            exit 1
+          fi
+
+  test:
+    needs: pr-convention
+    if: ${{ !cancelled() && (needs.pr-convention.result == 'success' || needs.pr-convention.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Check formatting
+        run: ruff format --check .
+      - name: Lint
+        run: ruff check .
+      - name: Type check
+        run: mypy
+      - name: Verify contract fixture
+        run: python scripts/check_contract_fixture.py
+      - name: Compare fixture with immutable sdk-core source
+        run: |
+          curl --fail --show-error --silent --location \
+            --output "$RUNNER_TEMP/sdk-parity-v0.1.0.json" \
+            "https://raw.githubusercontent.com/mitralab-dev/mitra-core-sdk/b513454d0d1f7344a4656cd9c0e1e32530c5ea90/contracts/v0.1.0/sdk-parity.json"
+          python scripts/check_contract_fixture.py \
+            --canonical "$RUNNER_TEMP/sdk-parity-v0.1.0.json"
+      - name: Test
+        run: pytest --cov-report=xml:coverage.xml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  compatibility:
+    needs: pr-convention
+    if: ${{ !cancelled() && (needs.pr-convention.result == 'success' || needs.pr-convention.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Verify contract fixture
+        run: python scripts/check_contract_fixture.py
+      - name: Compare fixture with immutable sdk-core source
+        run: |
+          curl --fail --show-error --silent --location \
+            --output "$RUNNER_TEMP/sdk-parity-v0.1.0.json" \
+            "https://raw.githubusercontent.com/mitralab-dev/mitra-core-sdk/b513454d0d1f7344a4656cd9c0e1e32530c5ea90/contracts/v0.1.0/sdk-parity.json"
+          python scripts/check_contract_fixture.py \
+            --canonical "$RUNNER_TEMP/sdk-parity-v0.1.0.json"
+      - name: Test
+        run: pytest
+
+  build:
+    needs: [test, compatibility]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful test and compatibility
+        if: ${{ needs.test.result != 'success' || needs.compatibility.result != 'success' }}
+        run: exit 1
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build tooling
+        run: python -m pip install build twine
+      - name: Build distributions
+        run: python -m build
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+      - name: Smoke test wheel
+        run: |
+          wheel_venv="$(mktemp -d "$RUNNER_TEMP/mitra-functions-sdk-wheel.XXXXXX")"
+          trap 'rm -rf -- "$wheel_venv"' EXIT
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install dist/*.whl
+          "$wheel_venv/bin/python" -c "from mitra_functions_sdk import MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment; assert all((MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment))"
+
+  sonar:
+    needs: build
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-report
+      - uses: SonarSource/sonarqube-scan-action@v7
+        with:
+          args: -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

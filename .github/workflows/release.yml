@@ -1,0 +1,121 @@
+name: Release
+run-name: Release v${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.2.0)'
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch
+        if: github.ref_name != 'main'
+        run: |
+          echo "::error::Releases are only allowed from the main branch."
+          exit 1
+      - name: Validate version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must use canonical semantic versioning, for example 0.2.0."
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install build tooling
+        run: python -m pip install build twine uv
+      - name: Set distribution version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: uv version "$RELEASE_VERSION" --frozen
+      - name: Build distributions
+        run: python -m build
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+      - name: Smoke test wheel
+        run: |
+          wheel_venv="$(mktemp -d "$RUNNER_TEMP/mitra-functions-sdk-wheel.XXXXXX")"
+          trap 'rm -rf -- "$wheel_venv"' EXIT
+          python -m venv "$wheel_venv"
+          "$wheel_venv/bin/python" -m pip install dist/*.whl
+          "$wheel_venv/bin/python" -c "from mitra_functions_sdk import MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment; assert all((MitraApiError, MitraClient, MitraClientConfig, Plan, create_client, create_client_from_environment))"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-distributions
+          path: dist/
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Test
+        run: |
+          ruff format --check .
+          ruff check .
+          mypy
+          python scripts/check_contract_fixture.py
+          curl --fail --show-error --silent --location \
+            --output "$RUNNER_TEMP/sdk-parity-v0.1.0.json" \
+            "https://raw.githubusercontent.com/mitralab-dev/mitra-core-sdk/b513454d0d1f7344a4656cd9c0e1e32530c5ea90/contracts/v0.1.0/sdk-parity.json"
+          python scripts/check_contract_fixture.py \
+            --canonical "$RUNNER_TEMP/sdk-parity-v0.1.0.json"
+          pytest
+
+  bump:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GH_RELEASE_TOKEN }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip install uv
+          uv version "$RELEASE_VERSION" --frozen
+      - name: Commit and tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add pyproject.toml
+          git diff --cached --quiet || git commit -m "chore: bump version to $RELEASE_VERSION"
+          git tag "v$RELEASE_VERSION"
+          git push
+          git push origin "v$RELEASE_VERSION"
+
+  publish:
+    needs: bump
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mitra-functions-sdk
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: package-distributions
+          path: dist/
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
