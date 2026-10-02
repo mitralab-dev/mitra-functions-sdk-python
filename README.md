@@ -12,7 +12,7 @@ Python 3.11 ou mais novo. Importado como `mitra_functions_sdk`; a única depend�
 
 ## Configuração
 
-`create_client()` sem argumento lê o ambiente; `create_client_from_environment(env)` lê de um mapping, útil em teste. `create_client(MitraClientConfig(...))` usa só o que for passado, sem cair no ambiente.
+`create_client()` sem argumento lê as variáveis da tabela; `create_client_from_environment(env)` lê de um mapping, útil em teste. `create_client(MitraClientConfig(...))` usa só o que for passado, sem cair no ambiente. O runtime de Functions não injeta essas variáveis (veja a primeira armadilha), então lá o client se monta com `MitraClientConfig`, como no exemplo.
 
 | Variável | Campo | Obrigatória | Uso |
 |---|---|---|---|
@@ -28,11 +28,21 @@ Python 3.11 ou mais novo. Importado como `mitra_functions_sdk`; a única depend�
 ## Uso
 
 ```python
-from mitra_functions_sdk import MitraApiError, create_client
+import os
+
+from mitra_functions_sdk import MitraApiError, MitraClientConfig, create_client
+
+
+def runtime_config() -> MitraClientConfig:
+    return MitraClientConfig(
+        api_url=os.environ["MITRA_BASE_URL"].removesuffix("/legacy"),
+        access_token=os.environ["MITRA_TOKEN"],
+        app_id=os.environ["MITRA_PROJECT_ID"],
+    )
 
 
 def handler(event: dict[str, object], context: dict[str, object]) -> dict[str, object]:
-    with create_client() as mitra:
+    with create_client(runtime_config()) as mitra:
         orders = mitra.entities.table("Order")
         created = orders.create({"customerId": event["customerId"], "status": "pending"})
         try:
@@ -44,7 +54,7 @@ def handler(event: dict[str, object], context: dict[str, object]) -> dict[str, o
 
 ## Contratos e armadilhas
 
-- O runtime de Functions hoje injeta `MITRA_TOKEN`, `MITRA_BASE_URL` e `MITRA_PROJECT_ID`, os nomes do SDK legado, e este SDK não lê esses nomes: sem as variáveis da tabela, `create_client()` falha com `MitraConfigError`. Nesse caso, monte o `MitraClientConfig` explicitamente.
+- O runtime de Functions injeta `MITRA_TOKEN`, `MITRA_BASE_URL` (a URL do gateway com `/legacy` no fim) e `MITRA_PROJECT_ID`, os nomes do SDK legado, e este SDK não lê esses nomes: no runtime, `create_client()` sem argumento falha com `MitraConfigError`. Monte o `MitraClientConfig` a partir deles, tirando o `/legacy`, como no exemplo. Execução sem usuário que a invoque (passo de workflow, por exemplo) não recebe nenhuma dessas variáveis.
 - Custom query sem data source falha com `MitraConfigError`. `init()` busca o valor em `/code-studio/api/v1/apps/{appId}/info` só quando ele ainda não existe, e lança `MitraResponseError` se o app não tem data source. A requisição envia `dataSourceId` e `parameters`.
 - Use o client como context manager ou chame `close()`: sem isso, o pool de conexões do `httpx` fica aberto até o fim do processo.
 - O SDK faz uma única tentativa por requisição e nunca repete, para não reexecutar escrita. `retryable` é só diagnóstico.
@@ -53,11 +63,7 @@ def handler(event: dict[str, object], context: dict[str, object]) -> dict[str, o
 
 ## Contrato com o Core
 
-Os testes executam o corpus SDK-PARITY-001 do `mitra-core-sdk` a partir de uma cópia em `tests/fixtures/`, para rodarem offline. O manifest ao lado fixa a versão (hoje `0.1.0`), o commit de origem e o SHA-256. O CI baixa o arquivo original nesse commit e compara byte a byte. Para conferir a cópia localmente:
-
-```bash
-python scripts/check_contract_fixture.py
-```
+Os testes executam o corpus SDK-PARITY-001 do `mitra-core-sdk` a partir de uma cópia em `tests/fixtures/`, para rodarem offline. O manifest ao lado fixa a versão (hoje `0.1.0`), o commit de origem e o SHA-256. O CI baixa o arquivo original nesse commit e compara byte a byte. Para conferir a cópia localmente, rode `python scripts/check_contract_fixture.py`.
 
 ## Erros
 
