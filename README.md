@@ -12,7 +12,7 @@ Requer Python 3.11 ou mais novo. O pacote é importado como `mitra_functions_sdk
 
 ## Início rápido
 
-Dentro de uma Server Function, `create_client()` sem argumento lê a configuração que o runtime injeta. Use o client como context manager para que as conexões sejam fechadas no fim:
+Dentro de uma Server Function invocada por um usuário, `create_client()` sem argumento lê a configuração que o runtime injeta. Use o client como context manager para que as conexões sejam fechadas no fim:
 
 ```python
 from mitra_functions_sdk import MitraApiError, create_client
@@ -29,7 +29,7 @@ def handler(event: dict[str, object], context: dict[str, object]) -> dict[str, o
         return {"order": created, "notification": execution}
 ```
 
-Fora do runtime, passe a configuração explícita com `create_client(MitraClientConfig(...))`, ou um mapping com `create_client_from_environment(env)`, útil em teste.
+Execução sem usuário que invoca, como passo de workflow, não recebe essas variáveis, e `create_client()` lança `MitraConfigError`. Nesse caso, e fora do runtime, passe a configuração explícita com `create_client(MitraClientConfig(...))`, ou um mapping com `create_client_from_environment(env)`, útil em teste.
 
 ## O que dá para fazer
 
@@ -70,7 +70,7 @@ ID vazio, `.` ou `..` e `delete_many({})` lançam `ValueError` antes de qualquer
 ## Boas práticas
 
 - Use `with create_client() as mitra:` ou chame `mitra.close()` no fim, para devolver as conexões.
-- O SDK faz uma tentativa por requisição e não repete sozinho, para não executar uma escrita duas vezes. Se quiser repetir, decida no seu código com base em `retryable`.
+- O SDK faz uma tentativa por requisição e não repete sozinho, para não executar uma escrita duas vezes. `retryable` indica falha possivelmente temporária, não que a escrita deixou de acontecer: um timeout ou 5xx pode chegar depois de a API gravar. Só repita uma escrita quando ela for idempotente.
 - O prazo padrão é de 10 segundos por requisição. Quando uma chamada precisar de mais, ajuste mantendo a leitura do ambiente: `create_client(dataclasses.replace(MitraClientConfig.from_environment(), timeout_seconds=30))`.
 - Custom query precisa de data source: defina `MITRA_DATA_SOURCE_ID` ou chame `mitra.init()` uma vez antes de `queries.execute`, que busca o data source do app.
 
