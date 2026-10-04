@@ -47,24 +47,53 @@ class MitraClientConfig:
     @classmethod
     def from_environment(cls, env: Mapping[str, str] | None = None) -> MitraClientConfig:
         source = os.environ if env is None else env
-        missing = [
-            name
-            for name in (
-                "MITRA_API_URL",
-                "MITRA_PLATFORM_ACCESS_TOKEN",
-                "MITRA_APP_ID",
-            )
-            if not source.get(name, "").strip()
-        ]
-        if missing:
+        # The first variable that is set wins even when blank, so a blank canonical name fails
+        # instead of silently falling back to the runtime alias, matching the JavaScript SDK.
+        if "MITRA_API_URL" in source:
+            api_url = _non_blank(source["MITRA_API_URL"])
+        else:
+            legacy_base_url = _non_blank(source.get("MITRA_BASE_URL"))
+            api_url = None if legacy_base_url is None else _strip_legacy_suffix(legacy_base_url)
+        access_token = _non_blank(
+            _first_present(source, "MITRA_PLATFORM_ACCESS_TOKEN", "MITRA_TOKEN")
+        )
+        app_id = _non_blank(_first_present(source, "MITRA_APP_ID", "MITRA_PROJECT_ID"))
+
+        if api_url is None or access_token is None or app_id is None:
+            missing = [
+                names
+                for value, names in (
+                    (api_url, "MITRA_API_URL (or MITRA_BASE_URL)"),
+                    (access_token, "MITRA_PLATFORM_ACCESS_TOKEN (or MITRA_TOKEN)"),
+                    (app_id, "MITRA_APP_ID (or MITRA_PROJECT_ID)"),
+                )
+                if value is None
+            ]
             raise MitraConfigError(f"Missing required environment variables: {', '.join(missing)}")
 
         return cls(
-            api_url=source["MITRA_API_URL"],
-            access_token=source["MITRA_PLATFORM_ACCESS_TOKEN"],
-            app_id=source["MITRA_APP_ID"],
+            api_url=api_url,
+            access_token=access_token,
+            app_id=app_id,
             data_source_id=source.get("MITRA_DATA_SOURCE_ID"),
         )
+
+
+def _first_present(source: Mapping[str, str], *names: str) -> str | None:
+    return next((source[name] for name in names if name in source), None)
+
+
+def _non_blank(value: str | None) -> str | None:
+    return value if value is not None and value.strip() else None
+
+
+# The Functions runtime injects the gateway URL with the legacy BFF prefix; native services
+# live at the gateway root.
+def _strip_legacy_suffix(legacy_base_url: str) -> str:
+    normalized = _normalize_api_url(legacy_base_url)
+    if httpx.URL(normalized).raw_path.endswith(b"/legacy"):
+        return normalized.removesuffix("/legacy")
+    return normalized
 
 
 def _optional_non_blank(value: str | None, field_name: str) -> str | None:
