@@ -3,6 +3,7 @@ from .config import MitraClientConfig
 from .errors import (
     MitraApiError,
     MitraConfigError,
+    MitraFileTransferError,
     MitraNetworkError,
     MitraResponseError,
     MitraSdkError,
@@ -10,6 +11,8 @@ from .errors import (
 from .models import (
     CurrentUser,
     DeleteManyResult,
+    FileMetadata,
+    FileReadUrl,
     FunctionExecution,
     Plan,
     ProxyInput,
@@ -22,11 +25,14 @@ from .models import (
 __all__ = [
     "CurrentUser",
     "DeleteManyResult",
+    "FileMetadata",
+    "FileReadUrl",
     "FunctionExecution",
     "MitraApiError",
     "MitraClient",
     "MitraClientConfig",
     "MitraConfigError",
+    "MitraFileTransferError",
     "MitraNetworkError",
     "MitraResponseError",
     "MitraSdkError",

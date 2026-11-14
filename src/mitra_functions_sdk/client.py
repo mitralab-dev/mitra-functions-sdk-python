@@ -9,6 +9,7 @@ from .auth import AuthModule
 from .config import MitraClientConfig
 from .entities import EntitiesModule
 from .errors import MitraResponseError
+from .files import FilesModule
 from .functions import FunctionsModule
 from .integration import IntegrationModule
 from .queries import QueriesModule
@@ -26,6 +27,7 @@ class MitraClient:
         self.queries = QueriesModule(self._transport, lambda: self.data_source_id)
         self.functions = FunctionsModule(self._transport)
         self.integration = IntegrationModule(self._transport)
+        self.files = FilesModule(self._transport)
 
     def init(self) -> None:
         if self.data_source_id is not None:

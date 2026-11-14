@@ -3,7 +3,15 @@ from __future__ import annotations
 from typing import TypeGuard, cast
 
 from .errors import MitraResponseError
-from .models import CurrentUser, FunctionExecution, ProxyResult, QueryResult
+from .models import (
+    CurrentUser,
+    FileMetadata,
+    FileReadUrl,
+    FileUpload,
+    FunctionExecution,
+    ProxyResult,
+    QueryResult,
+)
 
 
 def expect_object(payload: object | None, context: str) -> dict[str, object]:
@@ -74,14 +82,49 @@ def expect_proxy_result(payload: object | None, context: str) -> ProxyResult:
     result = expect_object(payload, context)
 
     _expect_integer(result, "status", context)
-    headers = _required_field(result, "headers", context)
-    if not _is_object(headers) or not all(isinstance(value, str) for value in headers.values()):
-        _invalid_field(context, "headers")
+    _expect_string_mapping(result, "headers", context)
     _required_field(result, "body", context)
     _expect_integer(result, "durationMs", context)
     _expect_string(result, "executionId", context)
 
     return cast(ProxyResult, result)
+
+
+def expect_file_metadata(payload: object | None, context: str) -> FileMetadata:
+    file = expect_object(payload, context)
+
+    for field in ("id", "name", "contentType"):
+        _expect_string(file, field, context)
+    _expect_integer(file, "sizeBytes", context)
+    for field in ("kind", "visibility", "status"):
+        _expect_string(file, field, context)
+    _expect_nullable_string(file, "ownerUserId", context)
+    _expect_string(file, "createdBy", context)
+    _expect_string(file, "createdAt", context)
+    _expect_nullable_string(file, "confirmedAt", context)
+    _expect_nullable_string(file, "expiresAt", context)
+
+    return cast(FileMetadata, file)
+
+
+def expect_file_upload(payload: object | None, context: str) -> FileUpload:
+    upload = expect_object(payload, context)
+
+    for field in ("fileId", "uploadUrl", "uploadMethod"):
+        _expect_string(upload, field, context)
+    _expect_string_mapping(upload, "uploadHeaders", context)
+    _expect_string(upload, "expiresAt", context)
+
+    return cast(FileUpload, upload)
+
+
+def expect_file_read_url(payload: object | None, context: str) -> FileReadUrl:
+    read_url = expect_object(payload, context)
+
+    _expect_string(read_url, "url", context)
+    _expect_string(read_url, "expiresAt", context)
+
+    return cast(FileReadUrl, read_url)
 
 
 def _is_object(value: object) -> TypeGuard[dict[str, object]]:
@@ -134,6 +177,14 @@ def _expect_object(
     if not _is_object(field_value):
         _invalid_field(context, field)
     return cast(dict[str, object], field_value)
+
+
+def _expect_string_mapping(value: dict[str, object], field: str, context: str) -> None:
+    field_value = _required_field(value, field, context)
+    if not _is_object(field_value) or not all(
+        isinstance(item, str) for item in field_value.values()
+    ):
+        _invalid_field(context, field)
 
 
 def _expect_nullable_object(value: dict[str, object], field: str, context: str) -> None:

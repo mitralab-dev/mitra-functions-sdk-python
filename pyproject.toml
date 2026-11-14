@@ -18,7 +18,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "httpx>=0.28.1,<1",
+    # _http.py calls the private httpx.Client._transport_for_url; check it before raising the cap.
+    "httpx>=0.28.1,<0.29",
 ]
 
 [project.urls]

@@ -1,6 +1,6 @@
 # Mitra Functions SDK for Python
 
-SDK Python para Server Functions da Mitra: dá acesso a usuário atual, entidades, custom queries, Functions e integrações do app em que a Function roda. App de browser usa outro pacote, o `@mitralab.io/platform-sdk`.
+SDK Python para Server Functions da Mitra: dá acesso a usuário atual, entidades, custom queries, Functions, integrações e arquivos do app em que a Function roda. App de browser usa outro pacote, o `@mitralab.io/platform-sdk`.
 
 ## Instalação
 
@@ -38,6 +38,44 @@ Execução sem usuário que invoca, como passo de workflow, não recebe essas va
 - `mitra.queries.execute(query_id, parameters)`: executa uma custom query do app.
 - `mitra.functions`: `execute` espera o resultado, `execute_async` devolve a execução para acompanhar com `get_execution`, e `cancel_execution` cancela.
 - `mitra.integration`: `execute_resource` chama um recurso de integração e `execute` chama uma configuração de template.
+- `mitra.files`: `get`, `get_url`, `download`, `upload` e `delete` sobre arquivos do app; veja [Arquivos](#arquivos).
+
+## Arquivos
+
+A API de arquivos do Data Manager confere a permissão, registra o arquivo e assina um link; os bytes vão direto ao storage por esse link, que vale poucos minutos.
+
+```python
+with create_client() as mitra:
+    report = mitra.files.upload(
+        csv_bytes,
+        name="vendas.csv",
+        content_type="text/csv",
+        kind="TEMPORARY",
+        visibility="RESTRICTED",
+    )
+    content = mitra.files.download(report["id"])
+```
+
+| Método | Efeito |
+|---|---|
+| `get(file_id)` | metadado (`FileMetadata`), com o dono em `ownerUserId` |
+| `get_url(file_id)` | link de leitura (`FileReadUrl`), que vale 5 minutos |
+| `download(file_id)` | pede o link e devolve o conteúdo em `bytes` |
+| `upload(content, *, name, kind, visibility, content_type="application/octet-stream", app_owned=False)` | pede o envio, manda os bytes ao link devolvido e confirma; devolve o arquivo `READY` |
+| `delete(file_id)` | apaga o arquivo |
+
+`kind` é `TEMPORARY`, que vence 7 dias depois do pedido de envio, ou `PERMANENT`. `visibility` é `PRIVATE` (só o dono), `RESTRICTED` (o dono ou uma Server Function do app que roda em nome de um usuário) ou `APP` (quem tem leitura de arquivos no app). `app_owned=True` cria arquivo do app, sem dono, e pede `visibility="APP"`. `content` precisa ser `bytes`, porque o tamanho vai assinado no link.
+
+Garantias:
+
+- O pedido ao storage vai ao endereço que a API devolveu, com o método e só os cabeçalhos que ela devolveu. Não leva o token nem o que o `http_client` acrescenta (cabeçalhos padrão, autenticação, cookies, event hooks), e um redirect é recusado.
+- A URL do pedido ao storage nunca aparece em mensagem de erro, `repr`, exceção encadeada nem no log. Num erro de envio, de confirmação ou de leitura, ela também não fica nas variáveis locais que um traceback com `capture_locals` mostra (Sentry, `pytest --showlocals`). O `httpx.Client` registra em INFO a URL de cada pedido, por isso o pedido ao storage sai pelo transport do client, abaixo dessa camada. Em DEBUG, o httpcore registra o host, a porta e os cabeçalhos da resposta do storage, sem o caminho nem a query do pedido.
+- Falha no envio dos bytes, inclusive `412` e erro de rede, apaga o arquivo `PENDING` antes de lançar `MitraFileTransferError` com `step="send"`, e `cleaned_up` diz se a exclusão funcionou.
+- Falha na confirmação também lança `MitraFileTransferError`, com `step="confirm"` e o `file_id`. Nesse passo `cleaned_up` é sempre `False`, porque a SDK não apaga nada, e o erro da chamada de confirmação fica em `__cause__`; um `FILE_SIZE_MISMATCH` ali quer dizer que a API já descartou o arquivo. Para seguir, `get(file_id)` mostra se o arquivo ficou `READY`, o que acontece quando só a resposta se perdeu; se ele seguir `PENDING`, apague com `delete(file_id)` e envie de novo.
+
+Erros da API, como `404 NOT_FOUND` para arquivo que não existe ou que o chamador não pode ver, `413 FILE_TOO_LARGE`, `409 FILE_QUOTA_REACHED` e `429`, chegam como `MitraApiError`. Com a feature de arquivos desligada no workspace, toda rota responde `404`. O `timeout_seconds` vale também no storage, por operação de rede (conectar, ler, escrever), e não pela transferência inteira.
+
+Fora do escopo: envio em partes, retomada, cache de link e link de vários arquivos numa chamada.
 
 ## Configuração
 
@@ -64,8 +102,9 @@ Todas as exceções herdam de `MitraSdkError`. `MitraApiError`, `MitraNetworkErr
 | `MitraApiError` | a API respondeu com erro HTTP |
 | `MitraNetworkError` | timeout (`REQUEST_TIMEOUT`) ou falha de rede (`NETWORK_ERROR`) |
 | `MitraResponseError` | resposta de sucesso vazia, com JSON inválido ou fora do formato esperado |
+| `MitraFileTransferError` | os bytes de um arquivo não chegaram ao storage ou não voltaram dele, ou o envio não foi confirmado; traz `file_id`, `step` (`send`, `confirm` ou `download`), `status` e `cleaned_up`, e não traz `code`, `retryable` nem `request_id`. `status` é a resposta do storage, `None` quando ele não respondeu ou quando o passo não envolve o storage (`confirm`) |
 
-ID vazio, `.` ou `..` e `delete_many({})` lançam `ValueError` antes de qualquer requisição.
+ID vazio, `.` ou `..` e `delete_many({})` lançam `ValueError` antes de qualquer requisição, e `files.upload` com `content` que não é `bytes` lança `TypeError`.
 
 ## Boas práticas
 

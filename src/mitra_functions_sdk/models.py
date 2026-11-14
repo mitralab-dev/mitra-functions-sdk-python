@@ -70,3 +70,31 @@ class ProxyResult(TypedDict):
     body: object
     durationMs: int
     executionId: str
+
+
+class FileMetadata(TypedDict):
+    id: str
+    name: str
+    contentType: str
+    sizeBytes: int
+    kind: str
+    visibility: str
+    status: str
+    ownerUserId: str | None
+    createdBy: str
+    createdAt: str
+    confirmedAt: str | None
+    expiresAt: str | None
+
+
+class FileReadUrl(TypedDict):
+    url: str
+    expiresAt: str
+
+
+class FileUpload(TypedDict):
+    fileId: str
+    uploadUrl: str
+    uploadMethod: str
+    uploadHeaders: dict[str, str]
+    expiresAt: str
