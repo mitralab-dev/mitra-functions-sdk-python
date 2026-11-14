@@ -100,6 +100,7 @@ def upload_routes(**overrides: Reply) -> dict[tuple[str, str], Reply]:
         "send": ("PUT", "storage"),
         "confirm": ("POST", f"{FILE_PATH}/confirm"),
         "delete": ("DELETE", FILE_PATH),
+        "read_url": ("POST", f"{FILE_PATH}/read-url"),
         "receive": ("GET", "storage"),
     }
     for step, reply in overrides.items():
@@ -161,12 +162,13 @@ def serialize_exception(error: BaseException) -> str:
 
 def sdk_frames(error: BaseException) -> list[traceback.FrameSummary]:
     frames: list[traceback.FrameSummary] = []
-    captured: traceback.TracebackException | None = traceback.TracebackException.from_exception(
-        error, capture_locals=True
-    )
-    while captured is not None:
+    pending = [traceback.TracebackException.from_exception(error, capture_locals=True)]
+    while pending:
+        captured = pending.pop()
         frames.extend(frame for frame in captured.stack if "mitra_functions_sdk" in frame.filename)
-        captured = captured.__cause__ or captured.__context__
+        pending.extend(
+            chained for chained in (captured.__cause__, captured.__context__) if chained is not None
+        )
     return frames
 
 
@@ -730,42 +732,130 @@ def test_signed_links_never_reach_the_logs(caplog: pytest.LogCaptureFixture) -> 
     http_client.close()
 
 
+def download_file(client: MitraClient) -> object:
+    return client.files.download("file-1")
+
+
 @pytest.mark.parametrize(
-    ("overrides", "operation", "raising_frame"),
+    ("overrides", "operation", "error_type", "raising_frame"),
     [
         (
             {"send": httpx.ConnectError(f"cannot connect to {UPLOAD_URL}")},
             upload_csv,
+            MitraFileTransferError,
             "upload",
         ),
         (
             {"confirm": api_error(409, "FILE_NOT_UPLOADED", "File was not uploaded")},
             upload_csv,
+            MitraFileTransferError,
             "upload",
         ),
         (
             {"receive": httpx.Response(403)},
-            lambda client: client.files.download("file-1"),
+            download_file,
+            MitraFileTransferError,
             "download",
         ),
+        (
+            {
+                "request": httpx.Response(
+                    201, json=upload_response(uploadHeaders={"content-type": 1})
+                )
+            },
+            upload_csv,
+            MitraResponseError,
+            "_request_and_send",
+        ),
+        (
+            {"read_url": httpx.Response(200, json={"url": READ_URL, "expiresAt": 1763028300})},
+            download_file,
+            MitraResponseError,
+            "get_url",
+        ),
+        (
+            {"request": httpx.Response(201, json=[UPLOAD_URL])},
+            upload_csv,
+            MitraResponseError,
+            "_request_and_send",
+        ),
+        (
+            {"read_url": httpx.Response(200, json=[READ_URL])},
+            download_file,
+            MitraResponseError,
+            "get_url",
+        ),
+    ],
+    ids=[
+        "send",
+        "confirm",
+        "download",
+        "malformed-upload-answer",
+        "malformed-read-answer",
+        "upload-answer-not-an-object",
+        "read-answer-not-an-object",
     ],
 )
 def test_signed_link_is_not_in_the_locals_of_any_sdk_frame(
     overrides: dict[str, Reply],
     operation: Callable[[MitraClient], object],
+    error_type: type[Exception],
     raising_frame: str,
 ) -> None:
     client, http_client = make_client(platform(upload_routes(**overrides), []))
 
-    with pytest.raises(MitraFileTransferError) as caught:
+    with pytest.raises(error_type) as caught:
         operation(client)
 
     frames = sdk_frames(caught.value)
-    assert raising_frame in {frame.name for frame in frames}
+    assert any(frame.name == raising_frame and frame.locals for frame in frames)
     captured_locals = json.dumps([frame.locals for frame in frames])
-    assert "file_id" in captured_locals
     for secret in (UPLOAD_URL, READ_URL, UPLOAD_SIGNATURE, READ_SIGNATURE):
         assert secret not in captured_locals
+    http_client.close()
+
+
+@pytest.mark.parametrize(
+    ("overrides", "operation", "message"),
+    [
+        (
+            {
+                "request": httpx.Response(
+                    201, json=upload_response(uploadHeaders={"content-type": 1})
+                )
+            },
+            upload_csv,
+            "File upload response has an invalid uploadHeaders field",
+        ),
+        (
+            {"request": httpx.Response(201, json=[UPLOAD_URL])},
+            upload_csv,
+            "File upload response must be a JSON object",
+        ),
+        (
+            {"read_url": httpx.Response(200, json={"url": READ_URL, "expiresAt": 1})},
+            download_file,
+            "File read URL response has an invalid expiresAt field",
+        ),
+    ],
+    ids=["upload-field", "upload-shape", "read-field"],
+)
+def test_malformed_link_answer_names_the_field_without_the_value(
+    overrides: dict[str, Reply],
+    operation: Callable[[MitraClient], object],
+    message: str,
+) -> None:
+    requests: list[httpx.Request] = []
+    client, http_client = make_client(platform(upload_routes(**overrides), requests))
+
+    with pytest.raises(MitraResponseError) as caught:
+        operation(client)
+
+    assert str(caught.value) == message
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert storage_requests(requests) == []
+    assert_no_signed_link(caught.value)
     http_client.close()
 
 

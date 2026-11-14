@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ._http import HttpTransport, StorageResponse
 from ._path import encode_path_segment
-from ._response import expect_file_metadata, expect_file_read_url, expect_file_upload
+from ._response import check_file_read_url, check_file_upload, expect_file_metadata
 from .errors import MitraFileTransferError, MitraResponseError, MitraSdkError
 from .models import FileMetadata, FileReadUrl
 
@@ -21,10 +21,13 @@ class FilesModule:
         )
 
     def get_url(self, file_id: str) -> FileReadUrl:
-        return expect_file_read_url(
+        read_url = check_file_read_url(
             self._transport.request("POST", "data-manager", f"{_file_path(file_id)}/read-url"),
             "File read URL response",
         )
+        if isinstance(read_url, str):
+            raise MitraResponseError(read_url)
+        return read_url
 
     def download(self, file_id: str) -> bytes:
         received = self._transport.storage_request("GET", self.get_url(file_id)["url"])
@@ -107,10 +110,12 @@ class FilesModule:
         content: bytes,
         request: dict[str, object],
     ) -> tuple[str, StorageResponse]:
-        upload = expect_file_upload(
+        upload = check_file_upload(
             self._transport.request("POST", "data-manager", "/api/v1/files", json_body=request),
             "File upload response",
         )
+        if isinstance(upload, str):
+            raise MitraResponseError(upload)
         sent = self._transport.storage_request(
             upload["uploadMethod"],
             upload["uploadUrl"],

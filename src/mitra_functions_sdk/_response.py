@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TypeGuard, cast
 
 from .errors import MitraResponseError
@@ -107,28 +108,57 @@ def expect_file_metadata(payload: object | None, context: str) -> FileMetadata:
     return cast(FileMetadata, file)
 
 
-def expect_file_upload(payload: object | None, context: str) -> FileUpload:
-    upload = expect_object(payload, context)
+# The answers that carry a signed link are checked without raising: an exception raised here keeps
+# the raw answer, link included, in the locals of every validator frame on its traceback, which an
+# error reporter that captures locals prints. The caller raises the returned diagnostic, which
+# names the field and never the value, after these frames have returned.
+def check_file_upload(payload: object | None, context: str) -> FileUpload | str:
+    problem = _first_invalid_field(
+        payload,
+        context,
+        (
+            ("fileId", _is_string),
+            ("uploadUrl", _is_string),
+            ("uploadMethod", _is_string),
+            ("uploadHeaders", _is_string_mapping),
+            ("expiresAt", _is_string),
+        ),
+    )
+    return cast(FileUpload, payload) if problem is None else problem
 
-    for field in ("fileId", "uploadUrl", "uploadMethod"):
-        _expect_string(upload, field, context)
-    _expect_string_mapping(upload, "uploadHeaders", context)
-    _expect_string(upload, "expiresAt", context)
 
-    return cast(FileUpload, upload)
+def check_file_read_url(payload: object | None, context: str) -> FileReadUrl | str:
+    problem = _first_invalid_field(
+        payload,
+        context,
+        (("url", _is_string), ("expiresAt", _is_string)),
+    )
+    return cast(FileReadUrl, payload) if problem is None else problem
 
 
-def expect_file_read_url(payload: object | None, context: str) -> FileReadUrl:
-    read_url = expect_object(payload, context)
-
-    _expect_string(read_url, "url", context)
-    _expect_string(read_url, "expiresAt", context)
-
-    return cast(FileReadUrl, read_url)
+def _first_invalid_field(
+    payload: object | None,
+    context: str,
+    fields: tuple[tuple[str, Callable[[object], bool]], ...],
+) -> str | None:
+    if not _is_object(payload):
+        return f"{context} must be a JSON object"
+    for field, is_valid in fields:
+        if field not in payload or not is_valid(payload[field]):
+            return f"{context} has an invalid {field} field"
+    return None
 
 
 def _is_object(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def _is_string(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _is_string_mapping(value: object) -> bool:
+    return _is_object(value) and all(isinstance(item, str) for item in value.values())
 
 
 def _is_integer(value: object) -> bool:
@@ -180,10 +210,7 @@ def _expect_object(
 
 
 def _expect_string_mapping(value: dict[str, object], field: str, context: str) -> None:
-    field_value = _required_field(value, field, context)
-    if not _is_object(field_value) or not all(
-        isinstance(item, str) for item in field_value.values()
-    ):
+    if not _is_string_mapping(_required_field(value, field, context)):
         _invalid_field(context, field)
 
 
