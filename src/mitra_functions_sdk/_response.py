@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TypeGuard, cast
 
 from .errors import MitraResponseError
-from .models import CurrentUser, FunctionExecution, ProxyResult, QueryResult
+from .models import (
+    CurrentUser,
+    FileMetadata,
+    FileReadUrl,
+    FileUpload,
+    FunctionExecution,
+    ProxyResult,
+    QueryResult,
+)
 
 
 def expect_object(payload: object | None, context: str) -> dict[str, object]:
@@ -74,9 +83,7 @@ def expect_proxy_result(payload: object | None, context: str) -> ProxyResult:
     result = expect_object(payload, context)
 
     _expect_integer(result, "status", context)
-    headers = _required_field(result, "headers", context)
-    if not _is_object(headers) or not all(isinstance(value, str) for value in headers.values()):
-        _invalid_field(context, "headers")
+    _expect_string_mapping(result, "headers", context)
     _required_field(result, "body", context)
     _expect_integer(result, "durationMs", context)
     _expect_string(result, "executionId", context)
@@ -84,8 +91,74 @@ def expect_proxy_result(payload: object | None, context: str) -> ProxyResult:
     return cast(ProxyResult, result)
 
 
+def expect_file_metadata(payload: object | None, context: str) -> FileMetadata:
+    file = expect_object(payload, context)
+
+    for field in ("id", "name", "contentType"):
+        _expect_string(file, field, context)
+    _expect_integer(file, "sizeBytes", context)
+    for field in ("kind", "visibility", "status"):
+        _expect_string(file, field, context)
+    _expect_nullable_string(file, "ownerUserId", context)
+    _expect_string(file, "createdBy", context)
+    _expect_string(file, "createdAt", context)
+    _expect_nullable_string(file, "confirmedAt", context)
+    _expect_nullable_string(file, "expiresAt", context)
+
+    return cast(FileMetadata, file)
+
+
+# The answers that carry a signed link are checked without raising: an exception raised here keeps
+# the raw answer, link included, in the locals of every validator frame on its traceback, which an
+# error reporter that captures locals prints. The caller raises the returned diagnostic, which
+# names the field and never the value, after these frames have returned.
+def check_file_upload(payload: object | None, context: str) -> FileUpload | str:
+    problem = _first_invalid_field(
+        payload,
+        context,
+        (
+            ("fileId", _is_string),
+            ("uploadUrl", _is_string),
+            ("uploadMethod", _is_string),
+            ("uploadHeaders", _is_string_mapping),
+            ("expiresAt", _is_string),
+        ),
+    )
+    return cast(FileUpload, payload) if problem is None else problem
+
+
+def check_file_read_url(payload: object | None, context: str) -> FileReadUrl | str:
+    problem = _first_invalid_field(
+        payload,
+        context,
+        (("url", _is_string), ("expiresAt", _is_string)),
+    )
+    return cast(FileReadUrl, payload) if problem is None else problem
+
+
+def _first_invalid_field(
+    payload: object | None,
+    context: str,
+    fields: tuple[tuple[str, Callable[[object], bool]], ...],
+) -> str | None:
+    if not _is_object(payload):
+        return f"{context} must be a JSON object"
+    for field, is_valid in fields:
+        if field not in payload or not is_valid(payload[field]):
+            return f"{context} has an invalid {field} field"
+    return None
+
+
 def _is_object(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def _is_string(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _is_string_mapping(value: object) -> bool:
+    return _is_object(value) and all(isinstance(item, str) for item in value.values())
 
 
 def _is_integer(value: object) -> bool:
@@ -134,6 +207,11 @@ def _expect_object(
     if not _is_object(field_value):
         _invalid_field(context, field)
     return cast(dict[str, object], field_value)
+
+
+def _expect_string_mapping(value: dict[str, object], field: str, context: str) -> None:
+    if not _is_string_mapping(_required_field(value, field, context)):
+        _invalid_field(context, field)
 
 
 def _expect_nullable_object(value: dict[str, object], field: str, context: str) -> None:

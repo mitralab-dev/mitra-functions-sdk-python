@@ -340,6 +340,10 @@ def test_dot_segments_are_rejected_before_any_request() -> None:
             lambda: client.queries.execute(".."),
             lambda: client.integration.execute_resource(".."),
             lambda: client.integration.execute(".", {"method": "GET", "endpoint": "/users"}),
+            lambda: client.files.get(" "),
+            lambda: client.files.get_url(".."),
+            lambda: client.files.download("."),
+            lambda: client.files.delete(".."),
         ):
             with pytest.raises(ValueError, match="must not be (?:blank|a dot segment)"):
                 operation()

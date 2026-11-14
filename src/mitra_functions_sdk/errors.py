@@ -33,6 +33,25 @@ class MitraResponseError(MitraSdkError):
         self.retryable = False
 
 
+class MitraFileTransferError(MitraSdkError):
+    """Raised when an upload or download fails after the API already knows the file."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        file_id: str,
+        step: str,
+        status: int | None = None,
+        cleaned_up: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.file_id = file_id
+        self.step = step
+        self.status = status
+        self.cleaned_up = cleaned_up
+
+
 class MitraApiError(MitraSdkError):
     """Error returned by a Mitra API service."""
 

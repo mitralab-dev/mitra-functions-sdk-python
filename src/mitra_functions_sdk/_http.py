@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import cast
 
 import httpx
@@ -12,6 +13,13 @@ from .errors import MitraApiError, MitraNetworkError, MitraResponseError
 QueryParam = str | int | float | bool
 _NO_BODY = object()
 _BEARER_CREDENTIAL = re.compile(r"\bbearer\s+\S+", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class StorageResponse:
+    status: int | None
+    content: bytes
+    failure: str | None
 
 
 class HttpTransport:
@@ -105,6 +113,53 @@ class HttpTransport:
                 f"Mitra API returned a null JSON response with status {response.status_code}"
             )
         return payload
+
+    # A signed storage link is the credential, so it goes to the client's transport, below the
+    # httpx.Client layer: that layer adds its default headers, auth and cookies, runs event hooks,
+    # may follow a redirect to an address the API did not sign, and logs every URL at INFO.
+    # _transport_for_url is private httpx API, used because it still honours the client's proxy
+    # mounts and an injected transport; it is why pyproject caps httpx below the next minor.
+    # Failures come back as a reason without the httpx error, whose message and request carry
+    # the URL.
+    def storage_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        content: bytes | None = None,
+    ) -> StorageResponse:
+        try:
+            request = httpx.Request(
+                method,
+                url,
+                headers=headers,
+                content=content,
+                extensions={"timeout": httpx.Timeout(self._timeout_seconds).as_dict()},
+            )
+            response = self._client._transport_for_url(request.url).handle_request(request)
+            try:
+                body = response.read()
+            finally:
+                response.close()
+        except httpx.TimeoutException:
+            return StorageResponse(
+                status=None, content=b"", failure="the storage request timed out"
+            )
+        except (httpx.RequestError, httpx.InvalidURL) as error:
+            return StorageResponse(
+                status=None,
+                content=b"",
+                failure=f"the storage request failed ({type(error).__name__})",
+            )
+
+        if not response.is_success:
+            return StorageResponse(
+                status=response.status_code,
+                content=b"",
+                failure=f"storage answered {response.status_code}",
+            )
+        return StorageResponse(status=response.status_code, content=body, failure=None)
 
     def close(self) -> None:
         if self._owns_client:
